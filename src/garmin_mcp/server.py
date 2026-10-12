@@ -10,7 +10,7 @@ import json
 import os
 from collections.abc import Callable
 from datetime import date as _date
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -777,6 +777,59 @@ def _classify_intervals(client: Garmin, activity_id: str) -> dict:
     }
 
 
+# The Garmin calendar is read one month per call, so the range is capped to
+# keep a careless request from fanning out into a year of calls.
+_SCHEDULE_DEFAULT_DAYS = 14
+_SCHEDULE_MAX_DAYS = 92
+
+# Calendar items that are not plans: completed activities (list_activities_by_date
+# covers those) and weigh-ins.
+_SCHEDULE_SKIP_TYPES = {"activity", "weight"}
+
+
+def _months_between(start: _date, end: _date) -> list[tuple[int, int]]:
+    months = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        months.append((year, month))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return months
+
+
+def _fmt_scheduled_item(item: dict) -> dict:
+    duration = item.get("duration")
+    distance = item.get("distance")
+    return {
+        "date": str(item.get("date") or "")[:10] or None,
+        "item_type": item.get("itemType"),
+        "title": item.get("title"),
+        "sport": item.get("sportTypeKey"),
+        "workout_id": item.get("workoutId"),
+        "scheduled_id": item.get("id"),
+        "duration_min": round(duration / 60, 1) if isinstance(duration, (int, float)) else None,
+        "distance_km": round(distance / 1000, 2) if isinstance(distance, (int, float)) else None,
+        "is_race": item.get("isRace"),
+    }
+
+
+def _scheduled_items(client: Garmin, start: _date, end: _date) -> list[dict]:
+    """Planned calendar items dated start..end inclusive, oldest first."""
+    seen: set[tuple[Any, Any]] = set()
+    items = []
+    for year, month in _months_between(start, end):
+        for item in (client.get_scheduled_workouts(year, month) or {}).get("calendarItems") or []:
+            if not isinstance(item, dict) or item.get("itemType") in _SCHEDULE_SKIP_TYPES:
+                continue
+            day = str(item.get("date") or "")[:10]
+            # A month view can spill into the neighbouring weeks; dedupe across calls.
+            key = (item.get("itemType"), item.get("id"))
+            if not start.isoformat() <= day <= end.isoformat() or key in seen:
+                continue
+            seen.add(key)
+            items.append(_fmt_scheduled_item(item))
+    return sorted(items, key=lambda i: i["date"] or "")
+
+
 @mcp.tool()
 def list_recent_activities(limit: int = 10) -> str:
     """List the most recent Garmin activities, newest first.
@@ -849,6 +902,37 @@ def list_activities_by_date(start_date: str, end_date: str) -> str:
     of activity summaries in the same shape as list_recent_activities.
     """
     return _tool_call(lambda c: [_fmt_activity_summary(a) for a in c.get_activities_by_date(start_date, end_date)])
+
+
+@mcp.tool()
+def list_scheduled_workouts(start_date: str | None = None, end_date: str | None = None) -> str:
+    """List planned workouts and events from the Garmin Connect calendar.
+
+    Answers "what's on my training plan?". `start_date` defaults to today and
+    `end_date` to two weeks after it (both "YYYY-MM-DD", inclusive; at most
+    92 days apart). Returns a JSON object with "items", oldest first, each
+    with date, item_type (e.g. "workout", "event"), title, sport, workout_id,
+    scheduled_id, planned duration_min / distance_km when Garmin has an
+    estimate (else null), and is_race. Completed activities are left out —
+    use list_activities_by_date for what was actually done.
+    """
+
+    def build(c: Garmin) -> dict:
+        start = _date.fromisoformat(start_date) if start_date else _today_local()
+        end = _date.fromisoformat(end_date) if end_date else start + timedelta(days=_SCHEDULE_DEFAULT_DAYS - 1)
+        if end < start:
+            raise ValueError("end_date is before start_date")
+        if (end - start).days >= _SCHEDULE_MAX_DAYS:
+            raise ValueError(f"date range is longer than {_SCHEDULE_MAX_DAYS} days")
+        items = _scheduled_items(c, start, end)
+        return {
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "count": len(items),
+            "items": items,
+        }
+
+    return _tool_call(build)
 
 
 @mcp.tool()
