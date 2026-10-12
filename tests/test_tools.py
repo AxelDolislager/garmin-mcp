@@ -6,7 +6,7 @@ client that returns canned data shaped like real garminconnect responses.
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from garmin_mcp import server
 
@@ -244,6 +244,77 @@ def test_get_hydration_returns_daily_intake(monkeypatch):
     assert result["valueInML"] == 1750.0
     assert result["goalInML"] == 2500.0
     assert result["sweatLossInML"] == 620.0
+
+
+class FakeCalendarClient:
+    """Two months of Garmin calendar, with the week of 3 Nov visible from both."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_scheduled_workouts(self, year, month):
+        self.calls.append((year, month))
+        tempo = {
+            "id": 501, "itemType": "workout", "date": "2026-11-03", "title": "Tempo 3x10'",
+            "sportTypeKey": "running", "workoutId": 9001, "duration": 3600.0, "distance": 12000.0,
+        }
+        months = {
+            (2026, 10): [
+                {"id": 1, "itemType": "activity", "date": "2026-10-28", "title": "Easy run"},
+                {"id": 2, "itemType": "weight", "date": "2026-10-29"},
+                {"id": 500, "itemType": "workout", "date": "2026-10-30", "title": "Easy 45'",
+                 "sportTypeKey": "running", "workoutId": 9000, "duration": 2700.0},
+                tempo,
+            ],
+            (2026, 11): [
+                tempo,
+                {"id": 502, "itemType": "event", "date": "2026-11-08", "title": "Halve marathon", "isRace": True},
+                {"id": 503, "itemType": "workout", "date": "2026-11-20", "title": "Out of range"},
+            ],
+        }
+        return {"calendarItems": months.get((year, month), [])}
+
+
+def test_list_scheduled_workouts_spans_months_and_keeps_only_plans(monkeypatch):
+    fake = FakeCalendarClient()
+    monkeypatch.setattr(server, "get_client", lambda: fake)
+    result = json.loads(server.list_scheduled_workouts("2026-10-29", "2026-11-10"))
+
+    assert fake.calls == [(2026, 10), (2026, 11)]
+    assert result["count"] == 3
+    assert [i["title"] for i in result["items"]] == ["Easy 45'", "Tempo 3x10'", "Halve marathon"]
+    tempo = result["items"][1]
+    assert tempo == {
+        "date": "2026-11-03",
+        "item_type": "workout",
+        "title": "Tempo 3x10'",
+        "sport": "running",
+        "workout_id": 9001,
+        "scheduled_id": 501,
+        "duration_min": 60.0,
+        "distance_km": 12.0,
+        "is_race": None,
+    }
+    assert result["items"][2]["is_race"] is True
+    assert result["items"][2]["duration_min"] is None
+
+
+def test_list_scheduled_workouts_defaults_to_two_weeks_from_today(monkeypatch):
+    fake = FakeCalendarClient()
+    monkeypatch.setattr(server, "get_client", lambda: fake)
+    monkeypatch.setattr(server, "_today_local", lambda: date(2026, 10, 30))
+    result = json.loads(server.list_scheduled_workouts())
+    assert result["start_date"] == "2026-10-30"
+    assert result["end_date"] == "2026-11-12"
+    assert [i["scheduled_id"] for i in result["items"]] == [500, 501, 502]
+
+
+def test_list_scheduled_workouts_rejects_bad_ranges(monkeypatch):
+    fake = FakeCalendarClient()
+    monkeypatch.setattr(server, "get_client", lambda: fake)
+    assert "before start_date" in json.loads(server.list_scheduled_workouts("2026-11-10", "2026-11-01"))["error"]
+    assert "92 days" in json.loads(server.list_scheduled_workouts("2026-01-01", "2026-12-31"))["error"]
+    assert fake.calls == []
 
 
 def test_get_body_battery_derives_highest_lowest(monkeypatch):
