@@ -262,9 +262,6 @@ class OfficialGarminClient:
     def get_hydration_data(self, date: str) -> dict:
         raise OfficialApiUnavailableError("hydration")
 
-    def get_scheduled_workouts(self, year: int, month: int) -> dict:
-        raise OfficialApiUnavailableError("scheduled workouts / training calendar")
-
     def get_lactate_threshold(self, *args: Any, **kwargs: Any) -> dict:
         raise OfficialApiUnavailableError("lactate threshold")
 
