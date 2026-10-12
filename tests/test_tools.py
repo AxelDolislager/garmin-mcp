@@ -323,6 +323,75 @@ def test_get_body_battery_derives_highest_lowest(monkeypatch):
     assert result == [{"date": "2026-07-17", "charged": 69, "drained": 52, "highest": 77, "lowest": 14}]
 
 
+class FakeScaleClient:
+    """Garmin's weight service: masses in grams, list not guaranteed in date order."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_body_composition(self, startdate, enddate=None):
+        self.calls.append((startdate, enddate))
+        return {
+            "startDate": startdate,
+            "endDate": enddate,
+            "dateWeightList": [
+                {
+                    "calendarDate": "2026-10-10", "timestampGMT": 1791612000000, "weight": 78620.0,
+                    "bmi": 23.4, "bodyFat": 15.2, "bodyWater": 58.1, "muscleMass": 37420.0,
+                    "boneMass": 3510.0, "sourceType": "INDEX_SCALE",
+                },
+                {"calendarDate": "2026-10-01", "timestampGMT": 1790834400000, "weight": 79400.0,
+                 "bmi": 23.6, "sourceType": "MANUAL"},
+            ],
+        }
+
+
+def test_get_weight_converts_grams_and_orders_oldest_first(monkeypatch):
+    fake = FakeScaleClient()
+    monkeypatch.setattr(server, "get_client", lambda: fake)
+    result = json.loads(server.get_weight("2026-09-15", "2026-10-12"))
+
+    assert fake.calls == [("2026-09-15", "2026-10-12")]
+    assert result["count"] == 2
+    assert [w["date"] for w in result["weigh_ins"]] == ["2026-10-01", "2026-10-10"]
+    assert result["latest"] == {
+        "date": "2026-10-10",
+        "weight_kg": 78.6,
+        "bmi": 23.4,
+        "body_fat_pct": 15.2,
+        "body_water_pct": 58.1,
+        "muscle_mass_kg": 37.4,
+        "bone_mass_kg": 3.5,
+        "source": "INDEX_SCALE",
+    }
+    assert result["change_kg"] == -0.8
+    manual = result["weigh_ins"][0]
+    assert manual["body_fat_pct"] is None
+    assert manual["muscle_mass_kg"] is None
+
+
+def test_get_weight_defaults_to_last_30_days(monkeypatch):
+    fake = FakeScaleClient()
+    monkeypatch.setattr(server, "get_client", lambda: fake)
+    monkeypatch.setattr(server, "_today_local", lambda: date(2026, 10, 12))
+    result = json.loads(server.get_weight())
+    assert fake.calls == [("2026-09-13", "2026-10-12")]
+    assert (result["start_date"], result["end_date"]) == ("2026-09-13", "2026-10-12")
+
+
+def test_get_weight_handles_no_weigh_ins_and_bad_range(monkeypatch):
+    class EmptyScale:
+        def get_body_composition(self, startdate, enddate=None):
+            return {"dateWeightList": []}
+
+    monkeypatch.setattr(server, "get_client", lambda: EmptyScale())
+    empty = json.loads(server.get_weight("2026-10-01", "2026-10-07"))
+    assert empty["count"] == 0
+    assert empty["latest"] is None
+    assert empty["change_kg"] is None
+    assert "before start_date" in json.loads(server.get_weight("2026-10-07", "2026-10-01"))["error"]
+
+
 def test_get_performance_metrics_reshapes_all_sections(monkeypatch):
     monkeypatch.setattr(server, "get_client", lambda: FakeClient())
     result = json.loads(server.get_performance_metrics("2026-07-20"))

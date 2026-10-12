@@ -332,6 +332,15 @@ def test_tool_call_surfaces_official_unavailable(oauth_env, monkeypatch):
     assert out["auth_mode"] == "oauth"
 
 
+def test_weight_is_not_claimed_unavailable_from_the_official_api(oauth_env):
+    """Garmin delivers bodyComps; the error must blame this server, not the API."""
+    store = TokenStore(oauth_env.token_root)
+    client = OfficialGarminClient(oauth_env, store, "f" * 40, http=MagicMock())
+    with pytest.raises(RuntimeError, match="bodyComps") as excinfo:
+        client.get_body_composition("2026-09-01", "2026-09-30")
+    assert not isinstance(excinfo.value, OfficialApiUnavailableError)
+
+
 def test_session_mode_still_default(monkeypatch):
     monkeypatch.delenv("GARMIN_AUTH_MODE", raising=False)
     assert oauth_config.auth_mode() == "session"

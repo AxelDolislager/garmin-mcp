@@ -284,6 +284,42 @@ def _fmt_body_battery_day(item: dict) -> dict:
     }
 
 
+_WEIGHT_DEFAULT_DAYS = 30
+
+
+def _grams_to_kg(value: Any) -> float | None:
+    # Garmin's weight service reports every mass (weight, muscle, bone) in grams.
+    return round(value / 1000, 1) if isinstance(value, (int, float)) else None
+
+
+def _fmt_weigh_in(w: dict) -> dict:
+    return {
+        "date": w.get("calendarDate"),
+        "weight_kg": _grams_to_kg(w.get("weight")),
+        "bmi": w.get("bmi"),
+        "body_fat_pct": w.get("bodyFat"),
+        "body_water_pct": w.get("bodyWater"),
+        "muscle_mass_kg": _grams_to_kg(w.get("muscleMass")),
+        "bone_mass_kg": _grams_to_kg(w.get("boneMass")),
+        "source": w.get("sourceType"),
+    }
+
+
+def _fmt_weight_range(raw: dict, start: str, end: str) -> dict:
+    entries = [w for w in (raw or {}).get("dateWeightList") or [] if isinstance(w, dict)]
+    entries.sort(key=lambda w: (str(w.get("calendarDate") or ""), w.get("timestampGMT") or w.get("date") or 0))
+    weigh_ins = [_fmt_weigh_in(w) for w in entries]
+    weights = [w["weight_kg"] for w in weigh_ins if w["weight_kg"] is not None]
+    return {
+        "start_date": start,
+        "end_date": end,
+        "count": len(weigh_ins),
+        "latest": weigh_ins[-1] if weigh_ins else None,
+        "change_kg": round(weights[-1] - weights[0], 1) if len(weights) > 1 else None,
+        "weigh_ins": weigh_ins,
+    }
+
+
 def _speed_to_pace(speed_m_s: Any) -> tuple[str | None, float | None]:
     """Convert a running speed in m/s to (formatted "M:SS/km", decimal min/km).
 
@@ -1004,6 +1040,32 @@ def get_body_battery(start_date: str, end_date: str) -> str:
     are stripped; highest/lowest are derived from them before stripping.
     """
     return _tool_call(lambda c: [_fmt_body_battery_day(d) for d in c.get_body_battery(start_date, end_date)])
+
+
+@mcp.tool()
+def get_weight(start_date: str | None = None, end_date: str | None = None) -> str:
+    """Get weigh-ins and body composition over a date range.
+
+    `end_date` defaults to today and `start_date` to 29 days before it (both
+    "YYYY-MM-DD", inclusive). Returns a JSON object with "weigh_ins", oldest
+    first, each with date, weight_kg, bmi, body_fat_pct, body_water_pct,
+    muscle_mass_kg, bone_mass_kg and source (e.g. a smart scale or a manual
+    entry). Body-composition fields are null for a scale that does not
+    measure them. "latest" repeats the most recent weigh-in and "change_kg"
+    is the difference between the first and last weigh-in in the range
+    (null with fewer than two). A range without weigh-ins returns an empty
+    list, not an error.
+    """
+
+    def build(c: Garmin) -> dict:
+        end = _date.fromisoformat(end_date) if end_date else _today_local()
+        start = _date.fromisoformat(start_date) if start_date else end - timedelta(days=_WEIGHT_DEFAULT_DAYS - 1)
+        if end < start:
+            raise ValueError("end_date is before start_date")
+        raw = c.get_body_composition(start.isoformat(), end.isoformat())
+        return _fmt_weight_range(raw, start.isoformat(), end.isoformat())
+
+    return _tool_call(build)
 
 
 @mcp.tool()
