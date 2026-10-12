@@ -76,6 +76,7 @@ Restart your client and ask something like "How did I sleep last night?"
 | `get_activity_details(activity_id)` | Full detail for one activity, incl. explicit elapsed/timer/moving/stopped timing (stripped of bulky sample/GPS data) |
 | `get_activity_laps(activity_id, include_gps=False)` | Per-lap breakdown: distance, durations, pace, HR, power, cadence, interval intensity (WARMUP/ACTIVE/REST) |
 | `list_activities_by_date(start_date, end_date)` | Activity summaries in a date range |
+| `list_scheduled_workouts(start_date=None, end_date=None)` | Planned workouts and events from the Garmin calendar (default: today + 2 weeks, max 92 days): date, title, sport, workout id, planned duration/distance |
 | `get_daily_stats(date)` | Steps, calories, resting HR, stress for one day |
 | `get_sleep(date)` | Sleep stages, sleep score, overnight HRV and resting HR |
 | `get_heart_rate(date)` | Min/max/resting HR and 7-day average resting HR for one day |
