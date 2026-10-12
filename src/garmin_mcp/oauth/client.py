@@ -244,6 +244,12 @@ class OfficialGarminClient:
             "source": "official_dailies",
         }
 
+    def get_body_composition(self, start_date: str, end_date: str | None = None) -> dict:
+        # Garmin does deliver bodyComps, but they carry a measurement time rather
+        # than a start time, so the store cannot date them yet. Say so rather
+        # than OfficialApiUnavailableError, which would claim the API lacks it.
+        raise RuntimeError("weight is not read from the official bodyComps feed yet")
+
     def _daily_for_date(self, date: str) -> dict | None:
         # Garmin re-sends a day's summary as it fills up; the fullest one wins.
         dailies = self._data.by_date("dailies", date)

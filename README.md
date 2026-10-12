@@ -80,6 +80,7 @@ Restart your client and ask something like "How did I sleep last night?"
 | `get_sleep(date)` | Sleep stages, sleep score, overnight HRV and resting HR |
 | `get_heart_rate(date)` | Min/max/resting HR and 7-day average resting HR for one day |
 | `get_body_battery(start_date, end_date)` | Body Battery charged/drained/highest/lowest per day |
+| `get_weight(start_date=None, end_date=None)` | Weigh-ins over a range (default: last 30 days): weight, BMI, body fat/water, muscle and bone mass, plus the latest weigh-in and the change over the range |
 | `get_training_status(date)` | Training status, load, VO2 max, heat/altitude acclimation |
 | `get_performance_metrics(date=None)` | Running fitness/threshold snapshot: lactate threshold (LTHR + pace), VO2 max + fitness age, and 5k/10k/half/marathon race predictions |
 | `get_personal_records()` | Personal records / PBs: fastest 1km/1mile/5km/10km, longest run (labeled), plus raw type/value for any other record |
